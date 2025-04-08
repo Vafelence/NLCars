@@ -57,8 +57,11 @@ def wait_for_products(timeout=30):
 def read_file():
     try:
         logger.info("Начало чтения данных из файла %s", data_file)
+        start_time = time.time()  # Засекаем время
         with open(data_file, "r", encoding="utf-8") as f:
-            return set(line.strip() for line in f.readlines())
+            content = f.readlines()
+        logger.info("Чтение файла завершено за %.2f секунд", time.time() - start_time)
+        return set(line.strip() for line in content)
     except FileNotFoundError:
         logger.warning("Файл с данными не найден, создается новый.")
         return set()
