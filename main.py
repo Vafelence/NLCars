@@ -28,7 +28,7 @@ logger.info("Запуск WebDriver с опциями: %s", chrome_options.argum
 
 # Автоматическая установка ChromeDriver и запуск с опциями
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-driver.implicitly_wait(20)  # Увеличенное глобальное ожидание (поиск элементов)
+driver.implicitly_wait(30)  # Увеличенное глобальное ожидание
 
 # URL страницы
 url = "https://www.houseofmodelcars.com/eng/collection/formula-1/6?limit=192&sort=price&direction=asc&m=9+19+47+48+10+1+2&s=13&y=2024+2023+2022+2021+2020+2019+2018+2017+2007+2006+2001+2000"
@@ -74,8 +74,12 @@ def send_telegram_message(message, bot_token, chat_id):
                 "chat_id": chat_id,
                 "text": part,
             }
-            response = requests.get(url, params=params)
-            logger.info("Часть сообщения отправлена в Telegram. Ответ: %s", response.json())
+            response = requests.get(url, params=params, timeout=10)  # Устанавливаем тайм-аут
+            if response.status_code == 200:
+                logger.info("Часть сообщения отправлена в Telegram.")
+            else:
+                logger.error("Ошибка при отправке части сообщения в Telegram. Статус: %s", response.status_code)
+                break
             message = message[max_message_length:]  # Оставшийся текст для отправки
         # Отправка оставшейся части сообщения
         if message:
@@ -84,8 +88,11 @@ def send_telegram_message(message, bot_token, chat_id):
                 "chat_id": chat_id,
                 "text": message,
             }
-            response = requests.get(url, params=params)
-            logger.info("Сообщение отправлено в Telegram. Ответ: %s", response.json())
+            response = requests.get(url, params=params, timeout=10)  # Устанавливаем тайм-аут
+            if response.status_code == 200:
+                logger.info("Сообщение отправлено в Telegram.")
+            else:
+                logger.error("Ошибка при отправке сообщения в Telegram. Статус: %s", response.status_code)
     except Exception as e:
         logger.error("Ошибка при отправке сообщения в Telegram: %s", e)
 
@@ -94,9 +101,12 @@ try:
     while True:
         logger.info("Запуск очередной проверки товаров на сайте.")
         previous_items = read_file()
-        driver.get(url)
-
-        wait_for_products()  # Ждём, пока хотя бы один товар загрузится
+        try:
+            driver.get(url)
+            wait_for_products()  # Ждём, пока хотя бы один товар загрузится
+        except Exception as e:
+            logger.error("Ошибка при загрузке страницы или ожидании: %s", e)
+            continue
 
         # Скроллим до конца
         scroll_pause_time = 2
