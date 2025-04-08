@@ -114,6 +114,59 @@ def read_file():
 
 # Отправка сообщений в Telegram
 def send_telegram_message(message, bot_token, chat_id, retry=2):
+    # Максимальная длина сообщения в Telegram - 4096 символов
+    MAX_MESSAGE_LENGTH = 4000  # Берем с запасом
+    
+    # Если сообщение слишком длинное, разбиваем на части
+    if len(message) > MAX_MESSAGE_LENGTH:
+        logger.info(f"Сообщение слишком длинное ({len(message)} символов), разбиваем на части")
+        chunks = []
+        
+        # Если есть перечисление моделей, разбиваем по строкам
+        if "\n" in message:
+            lines = message.split("\n")
+            current_chunk = ""
+            
+            for line in lines:
+                # Если добавление новой строки сделает чанк слишком длинным
+                if len(current_chunk + "\n" + line) > MAX_MESSAGE_LENGTH:
+                    if current_chunk:  # Добавляем текущий чанк, если он не пустой
+                        chunks.append(current_chunk)
+                        current_chunk = line
+                    else:  # Если строка сама по себе слишком длинная
+                        if len(line) > MAX_MESSAGE_LENGTH:
+                            # Разбиваем длинную строку на части
+                            for i in range(0, len(line), MAX_MESSAGE_LENGTH):
+                                chunks.append(line[i:i+MAX_MESSAGE_LENGTH])
+                        else:
+                            chunks.append(line)
+                else:
+                    if current_chunk:
+                        current_chunk += "\n" + line
+                    else:
+                        current_chunk = line
+            
+            # Добавляем последний чанк, если он не пустой
+            if current_chunk:
+                chunks.append(current_chunk)
+        else:
+            # Если нет переносов строк, просто разбиваем по символам
+            for i in range(0, len(message), MAX_MESSAGE_LENGTH):
+                chunks.append(message[i:i+MAX_MESSAGE_LENGTH])
+        
+        # Отправляем каждый чанк отдельным сообщением
+        success = True
+        for i, chunk in enumerate(chunks):
+            chunk_message = f"Часть {i+1}/{len(chunks)}: {chunk}" if len(chunks) > 1 else chunk
+            if not _send_telegram_message(chunk_message, bot_token, chat_id, retry):
+                success = False
+        return success
+    else:
+        # Сообщение достаточно короткое, отправляем как есть
+        return _send_telegram_message(message, bot_token, chat_id, retry)
+
+# Внутренняя функция для фактической отправки сообщения
+def _send_telegram_message(message, bot_token, chat_id, retry=2):
     for attempt in range(retry + 1):
         try:
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -122,7 +175,11 @@ def send_telegram_message(message, bot_token, chat_id, retry=2):
                 "text": message,
             }
             response = requests.get(url, params=params, timeout=30)
-            logger.info(f"Сообщение отправлено в Telegram. Ответ: {response.json()}")
+            result = response.json()
+            logger.info(f"Сообщение отправлено в Telegram. Ответ: {result}")
+            if not result.get('ok'):
+                logger.error(f"Ошибка при отправке сообщения: {result}")
+                return False
             return True
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения в Telegram (попытка {attempt + 1}): {e}")
