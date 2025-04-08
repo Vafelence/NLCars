@@ -64,13 +64,28 @@ def read_file():
 # Отправка сообщений в Telegram
 def send_telegram_message(message, bot_token, chat_id):
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        params = {
-            "chat_id": chat_id,
-            "text": message,
-        }
-        response = requests.get(url, params=params)
-        logger.info("Сообщение отправлено в Telegram. Ответ: %s", response.json())
+        # Проверка длины сообщения
+        max_message_length = 4096
+        while len(message) > max_message_length:
+            # Если сообщение слишком длинное, отсылаем его частями
+            part = message[:max_message_length]
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            params = {
+                "chat_id": chat_id,
+                "text": part,
+            }
+            response = requests.get(url, params=params)
+            logger.info("Часть сообщения отправлена в Telegram. Ответ: %s", response.json())
+            message = message[max_message_length:]  # Оставшийся текст для отправки
+        # Отправка оставшейся части сообщения
+        if message:
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            params = {
+                "chat_id": chat_id,
+                "text": message,
+            }
+            response = requests.get(url, params=params)
+            logger.info("Сообщение отправлено в Telegram. Ответ: %s", response.json())
     except Exception as e:
         logger.error("Ошибка при отправке сообщения в Telegram: %s", e)
 
