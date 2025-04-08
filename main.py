@@ -1,17 +1,29 @@
+import os
+import time
+import requests
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
-import requests
-import logging
+from webdriver_manager.chrome import ChromeDriverManager
 
-# Настройки для PhantomJS
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+# Устанавливаем переменную окружения DISPLAY для использования Xvfb
+os.environ["DISPLAY"] = ":99"  # Указывает на виртуальный дисплей
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
+# Настройки Selenium
+chrome_options = Options()
+chrome_options.add_argument("--headless")  # Запуск без интерфейса
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--no-sandbox")
+
+# Автоматическая установка ChromeDriver и запуск с опциями
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+driver.implicitly_wait(20)  # Увеличенное глобальное ожидание (поиск элементов)
+
+# URL страницы
+url = "https://www.houseofmodelcars.com/eng/collection/formula-1/6?limit=192&sort=price&direction=asc&m=9+19+47+48+10+1+2&s=13&y=2024+2023+2022+2021+2020+2019+2018+2017+2007+2006+2001+2000"
 
 # Файл с сохранённой информацией
 data_file = "model_info.txt"
@@ -19,16 +31,6 @@ data_file = "model_info.txt"
 # Telegram
 bot_token = "6858480572:AAGUJwUq_UevIhrbQS6cG2nN0hfyDw8yh54"
 chat_id = "-4134676016"
-
-# Настройки PhantomJS
-phantomjs_path = "/usr/local/bin/phantomjs"  # Замените на путь к вашему PhantomJS, если нужно
-driver = webdriver.PhantomJS(executable_path=phantomjs_path)
-
-driver.set_window_size(1280, 1024)  # Устанавливаем размер окна, если нужно
-driver.implicitly_wait(20)  # Увеличенное глобальное ожидание (поиск элементов)
-
-# URL страницы
-url = "https://www.houseofmodelcars.com/eng/collection/formula-1/6?limit=192&sort=price&direction=asc&m=9+19+47+48+10+1+2&s=13&y=2024+2023+2022+2021+2020+2019+2018+2017+2007+2006+2001+2000"
 
 # Функция ожидания появления хотя бы одного элемента
 def wait_for_products(timeout=30):
@@ -56,7 +58,6 @@ def send_telegram_message(message, bot_token, chat_id):
 
 # Основной цикл
 try:
-    logger.info("Бот запущен.")
     while True:
         previous_items = read_file()
         driver.get(url)
@@ -118,6 +119,6 @@ try:
         time.sleep(600)
 
 except KeyboardInterrupt:
-    logger.info("Остановлено пользователем.")
+    print("Остановлено пользователем.")
 finally:
     driver.quit()
