@@ -147,3 +147,4 @@ except KeyboardInterrupt:
 finally:
     logger.info("Закрытие WebDriver.")
     driver.quit()
+
