@@ -40,6 +40,7 @@ data_file = "model_info.txt"
 bot_token = "6858480572:AAGUJwUq_UevIhrbQS6cG2nN0hfyDw8yh54"
 chat_id = "-4134676016"
 
+
 # Функция ожидания появления хотя бы одного элемента
 def wait_for_products(timeout=30):
     try:
@@ -51,15 +52,20 @@ def wait_for_products(timeout=30):
         logger.error("Ошибка при ожидании элементов на странице: %s", e)
         raise
 
-# Чтение данных из файла
+
+# Чтение данных из файла с обработкой ошибок
 def read_file():
     try:
+        logger.info("Начало чтения данных из файла %s", data_file)
         with open(data_file, "r", encoding="utf-8") as f:
-            logger.info("Чтение данных из файла %s", data_file)
             return set(line.strip() for line in f.readlines())
     except FileNotFoundError:
         logger.warning("Файл с данными не найден, создается новый.")
         return set()
+    except Exception as e:
+        logger.error("Ошибка при чтении файла %s: %s", data_file, e)
+        return set()
+
 
 # Отправка сообщений в Telegram
 def send_telegram_message(message, bot_token, chat_id):
@@ -73,6 +79,7 @@ def send_telegram_message(message, bot_token, chat_id):
         logger.info("Сообщение отправлено в Telegram. Ответ: %s", response.json())
     except Exception as e:
         logger.error("Ошибка при отправке сообщения в Telegram: %s", e)
+
 
 # Основной цикл
 try:
@@ -100,6 +107,9 @@ try:
         # Получаем товары
         logger.info("Получение товаров с сайта.")
         products = driver.find_elements(By.CLASS_NAME, "col-12.col-sm-6.col-md-6.col-lg-4.col-xl-3")
+        if not products:
+            logger.warning("Товары не найдены на странице!")
+
         current_items = set()
 
         for product in products:
@@ -107,7 +117,8 @@ try:
                 info_tag = product.find_element(By.CLASS_NAME, "product-block-info-wrapper")
                 info = " ".join(info_tag.text.strip().split()).replace("Details »", "").strip()
                 current_items.add(info)
-            except Exception:
+            except Exception as e:
+                logger.error("Ошибка при обработке товара: %s", e)
                 continue
 
         # Сравнение
@@ -130,7 +141,10 @@ try:
             message = "Изменений нет в Голландии."
 
         # Отправка сообщения
-        send_telegram_message(message, bot_token, chat_id)
+        if message:
+            send_telegram_message(message, bot_token, chat_id)
+        else:
+            logger.info("Нет новых сообщений для отправки в Telegram.")
 
         # Обновляем файл
         logger.info("Обновление файла с данными.")
@@ -147,4 +161,3 @@ except KeyboardInterrupt:
 finally:
     logger.info("Закрытие WebDriver.")
     driver.quit()
-
