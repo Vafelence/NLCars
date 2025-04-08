@@ -1,8 +1,10 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 import time
 import requests
 
@@ -12,21 +14,35 @@ chrome_options.add_argument("--headless")  # Запуск без интерфе�
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 
-# Автоматическая установка ChromeDriver
+# Автоматическая установка ChromeDriver и запуск с опциями
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+driver.implicitly_wait(20)  # Увеличенное глобальное ожидание (поиск элементов)
 
 # URL страницы
 url = "https://www.houseofmodelcars.com/eng/collection/formula-1/6?limit=192&sort=price&direction=asc&m=9+19+47+48+10+1+2&s=13&y=2024+2023+2022+2021+2020+2019+2018+2017+2007+2006+2001+2000"
 
-# Функция для чтения данных из файла
+# Файл с сохранённой информацией
+data_file = "model_info.txt"
+
+# Telegram
+bot_token = "6858480572:AAGUJwUq_UevIhrbQS6cG2nN0hfyDw8yh54"
+chat_id = "-4134676016"
+
+# Функция ожидания появления хотя бы одного элемента
+def wait_for_products(timeout=30):
+    WebDriverWait(driver, timeout).until(
+        EC.presence_of_element_located((By.CLASS_NAME, "product-block-info-wrapper"))
+    )
+
+# Чтение данных из файла
 def read_file():
     try:
-        with open("model_info.txt", "r", encoding="utf-8") as f:
+        with open(data_file, "r", encoding="utf-8") as f:
             return set(line.strip() for line in f.readlines())
     except FileNotFoundError:
         return set()
 
-# Функция для отправки сообщений в Telegram
+# Отправка сообщений в Telegram
 def send_telegram_message(message, bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {
@@ -36,79 +52,69 @@ def send_telegram_message(message, bot_token, chat_id):
     response = requests.get(url, params=params)
     return response.json()
 
-# Токен вашего Telegram-бота и ID чата
-bot_token = "6858480572:AAGUJwUq_UevIhrbQS6cG2nN0hfyDw8yh54"
-chat_id = "-4134676016"  # Например, ID группового чата или личного чата с ботом
-
-while True:
-    # Читаем данные из файла при каждой итерации
-    previous_items = read_file()
-
-    driver.get(url)
-
-    # Скроллим вниз, чтобы подгрузить все элементы
-    scroll_pause_time = 2
-    last_height = driver.execute_script("return document.body.scrollHeight")
-
+# Основной цикл
+try:
     while True:
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(scroll_pause_time)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            break
-        last_height = new_height
+        previous_items = read_file()
+        driver.get(url)
 
-    # Получаем все блоки товаров
-    products = driver.find_elements(By.CLASS_NAME, "col-12.col-sm-6.col-md-6.col-lg-4.col-xl-3")
+        wait_for_products()  # Ждём, пока хотя бы один товар загрузится
 
-    # Список найденных позиций
-    current_items = set()
+        # Скроллим до конца
+        scroll_pause_time = 2
+        last_height = driver.execute_script("return document.body.scrollHeight")
 
-    for product in products:
-        info_tag = product.find_element(By.CLASS_NAME, "product-block-info-wrapper")
+        while True:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(scroll_pause_time)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
 
-        info = " ".join(info_tag.text.strip().split("\n")) if info_tag else "Нет информации"
+        # Получаем товары
+        products = driver.find_elements(By.CLASS_NAME, "col-12.col-sm-6.col-md-6.col-lg-4.col-xl-3")
+        current_items = set()
 
-        # Убираем "Details »" из информации, если оно есть
-        info = info.replace("Details »", "").strip()
+        for product in products:
+            try:
+                info_tag = product.find_element(By.CLASS_NAME, "product-block-info-wrapper")
+                info = " ".join(info_tag.text.strip().split()).replace("Details »", "").strip()
+                current_items.add(info)
+            except Exception:
+                continue
 
-        # Добавляем только информацию
-        current_items.add(info)
+        # Сравнение
+        new_models = current_items - previous_items
+        ended_models = previous_items - current_items
 
-    # Сравниваем текущие и предыдущие позиции
-    new_models = current_items - previous_items
-    ended_models = previous_items - current_items
+        message = ""
 
-    # Флаг для записи в файл
-    changes_detected = False
+        if new_models or ended_models:
+            if new_models:
+                message += "\n🔥 Новые модели в Голландии:\n"
+                for item in sorted(new_models):
+                    message += f"+ {item}\n"
 
-    message = ""
+            if ended_models:
+                message += "\n❌ Закончились модели в Голландии:\n"
+                for item in sorted(ended_models):
+                    message += f"- {item}\n"
+        else:
+            message = "Изменений нет в Голландии."
 
-    if new_models or ended_models:
-        changes_detected = True
+        # Отправка сообщения
+        send_telegram_message(message, bot_token, chat_id)
 
-        if new_models:
-            message += "\n🔥 Новые модели в Голландии:\n"
-            for item in sorted(new_models):
-                message += "+ " + item + "\n"
+        # Обновляем файл
+        with open(data_file, "w", encoding="utf-8") as f:
+            for item in sorted(current_items):
+                f.write(item + "\n")
 
-        if ended_models:
-            message += "\n❌ Закончились модели в Голландии:\n"
-            for item in sorted(ended_models):
-                message += "- " + item + "\n"
-    else:
-        message = "Изменений нет в Голландии."
+        # Пауза между проверками (10 минут)
+        time.sleep(600)
 
-    # Отправляем сообщение в Telegram, если есть изменения или нет изменений
-    send_telegram_message(message, bot_token, chat_id)
-
-    # Записываем новые данные в файл
-    with open("model_info.txt", "w", encoding="utf-8") as f:
-        for item in sorted(current_items):
-            f.write(item + "\n")
-
-    # Ждём 1 минуту перед следующей проверкой
-    time.sleep(600)
-
-# Закрываем браузер
-driver.quit()
+except KeyboardInterrupt:
+    print("Остановлено пользователем.")
+finally:
+    driver.quit()
