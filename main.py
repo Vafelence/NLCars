@@ -10,6 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from urllib3.exceptions import ReadTimeoutError
 
 # Устанавливаем переменную окружения DISPLAY для использования Xvfb
 os.environ["DISPLAY"] = ":99"  # Указывает на виртуальный дисплей
@@ -40,6 +41,7 @@ PAGE_LOAD_TIMEOUT = 60  # Максимальное время загрузки �
 ELEMENT_WAIT_TIMEOUT = 20  # Максимальное время ожидания элементов
 SCROLL_TIMEOUT = 15  # Максимальное время на прокрутку в секундах
 BETWEEN_CHECKS_INTERVAL = 600  # Пауза между проверками (10 минут)
+DRIVER_MAX_LIFETIME = 7200  # Максимальное время жизни драйвера (2 часа) перед принудительным перезапуском
 
 # Проверка доступности сайта перед запуском Selenium
 def check_site_availability(url, timeout=10):
@@ -65,6 +67,15 @@ def init_driver():
     # Если все попытки не удались
     send_telegram_message("⚠️ Ошибка: Не удалось запустить WebDriver после нескольких попыток", bot_token, chat_id)
     raise RuntimeError("Не удалось инициализировать WebDriver")
+
+# Безопасное закрытие драйвера
+def safe_quit_driver(driver):
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+    return None
 
 # Функция ожидания появления хотя бы одного элемента
 def wait_for_products(driver, timeout=ELEMENT_WAIT_TIMEOUT):
@@ -190,12 +201,24 @@ url = "https://www.houseofmodelcars.com/eng/collection/formula-1/6?limit=192&sor
 # Основной цикл выполнения с защитой от сбоев
 def main():
     driver = None
+    driver_start_time = 0
+    
     try:
         driver = init_driver()
+        driver_start_time = time.time()
         error_counter = 0
         
         while True:
             try:
+                # Проверяем, не пора ли перезапустить драйвер из-за превышения времени жизни
+                current_time = time.time()
+                if current_time - driver_start_time > DRIVER_MAX_LIFETIME:
+                    # Перезапускаем драйвер каждые DRIVER_MAX_LIFETIME секунд для предотвращения утечек памяти
+                    driver = safe_quit_driver(driver)
+                    driver = init_driver()
+                    driver_start_time = time.time()
+                    error_counter = 0
+                
                 # Проверка доступности сайта перед запуском Selenium
                 if not check_site_availability(url):
                     time.sleep(60)  # Короткое ожидание перед следующей попыткой
@@ -207,25 +230,29 @@ def main():
                     driver.get(url)
                 except TimeoutException:
                     # Перезапускаем драйвер при таймауте
-                    if driver:
-                        try:
-                            driver.quit()
-                        except:
-                            pass
+                    driver = safe_quit_driver(driver)
                     driver = init_driver()
+                    driver_start_time = time.time()
                     continue
+                except Exception as e:
+                    # Проверяем на ошибку ReadTimeoutError
+                    if "Read timed out" in str(e) or isinstance(e.__cause__, ReadTimeoutError):
+                        # Перезапуск драйвера при таймауте чтения
+                        driver = safe_quit_driver(driver)
+                        driver = init_driver()
+                        driver_start_time = time.time()
+                        time.sleep(30)  # Дополнительная пауза перед повторной попыткой
+                        continue
+                    raise  # Пробрасываем другие исключения
                 
                 # Проверяем загрузку элементов
                 if not wait_for_products(driver):
                     error_counter += 1
                     if error_counter >= 3:
                         # Перезапуск драйвера после нескольких ошибок
-                        if driver:
-                            try:
-                                driver.quit()
-                            except:
-                                pass
+                        driver = safe_quit_driver(driver)
                         driver = init_driver()
+                        driver_start_time = time.time()
                         error_counter = 0
                     continue
                 
@@ -285,17 +312,30 @@ def main():
                 # Пауза между проверками (10 минут)
                 time.sleep(BETWEEN_CHECKS_INTERVAL)
                 
-            except WebDriverException:
-                # Перезапускаем драйвер при проблемах
-                if driver:
-                    try:
-                        driver.quit()
-                    except:
-                        pass
-                driver = init_driver()
-                time.sleep(30)  # Ждем перед следующей попыткой
+            except WebDriverException as e:
+                # Проверяем на ошибку таймаута
+                if "Read timed out" in str(e) or isinstance(e.__cause__, ReadTimeoutError):
+                    driver = safe_quit_driver(driver)
+                    driver = init_driver()
+                    driver_start_time = time.time()
+                    time.sleep(30)  # Дополнительная пауза перед повторной попыткой
+                else:
+                    # Перезапускаем драйвер при других проблемах WebDriver
+                    driver = safe_quit_driver(driver)
+                    driver = init_driver()
+                    driver_start_time = time.time()
+                    time.sleep(10)
+                continue
                 
             except Exception as e:
+                # Проверяем на ошибку таймаута в любых других исключениях
+                if "Read timed out" in str(e):
+                    driver = safe_quit_driver(driver)
+                    driver = init_driver()
+                    driver_start_time = time.time()
+                    time.sleep(30)
+                    continue
+                
                 # Отправляем уведомление об ошибке
                 send_telegram_message(f"⚠️ Ошибка в работе бота: {e}", bot_token, chat_id)
                 time.sleep(60)  # Ждем перед следующей попыткой
@@ -305,11 +345,7 @@ def main():
     except Exception as e:
         send_telegram_message(f"❌ Критическая ошибка: {e}", bot_token, chat_id)
     finally:
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
+        safe_quit_driver(driver)
 
 if __name__ == "__main__":
     main()
